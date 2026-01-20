@@ -171,14 +171,23 @@ async def save_booking(callback: CallbackQuery, state: FSMContext, bot: Bot):
     )
 
     # 🔔 Уведомление админу
-    await bot.send_message(
-        ADMIN_ID,
-        "📢 Новая запись!\n\n"
+    user = callback.from_user
+    client_name = user.full_name
+
+    text = (
+        "📢 <b>Новая запись!</b>\n\n"
         f"🛠 Услуга: {service_name}\n"
         f"👨‍🔧 Мастер: {master_name}\n"
         f"📅 Дата: {data['date']}\n"
-        f"⏰ Время: {data['time']}\n"
-        f"👤 Пользователь: {callback.from_user.full_name} (ID: {callback.from_user.id})"
+        f"⏰ Время: {data['time']}\n\n"
+        f"👤 Клиент: {client_name} - <a href='tg://user?id={user.id}'>написать</a>\n"
+        f"🆔 ID: <code>{user.id}</code>"
+    )
+
+    await bot.send_message(
+        ADMIN_ID,
+        text,
+        parse_mode="HTML"
     )
 
     await state.clear()
