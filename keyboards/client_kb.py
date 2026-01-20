@@ -1,21 +1,28 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from datetime import date, timedelta
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
+
+from datetime import datetime, timedelta
 
 
+# ---------------------------
+# Главное меню
+# ---------------------------
 def main_menu():
-    """
-    Главное меню бота
-    """
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Записаться", callback_data="book")]
-    ])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📅 Записаться", callback_data="book")]
+        ]
+    )
 
 
+# ---------------------------
+# Выбор услуги
+# ---------------------------
 def services_kb(services):
-    """
-    Кнопки выбора услуги
-    services — список услуг из БД
-    """
     keyboard = []
 
     for service_id, name, duration in services:
@@ -28,11 +35,13 @@ def services_kb(services):
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+
+# ---------------------------
+# Выбор мастера
+# ---------------------------
 def masters_kb(masters):
-    """
-    Кнопки выбора мастера
-    """
     keyboard = []
+
     for master_id, name in masters:
         keyboard.append([
             InlineKeyboardButton(
@@ -40,66 +49,76 @@ def masters_kb(masters):
                 callback_data=f"master_{master_id}"
             )
         ])
-    # кнопка отмены
-    keyboard.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def dates_kb(days=7):
-    """
-    Кнопки выбора даты (сегодня + N дней)
-    """
+# ---------------------------
+# Выбор даты
+# ---------------------------
+def dates_kb(days_ahead: int):
     keyboard = []
-    today = date.today()
+    today = datetime.today()
 
-    weekdays = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
-
-    for i in range(days):
-        d = today + timedelta(days=i)
-        if i == 0:
-            text = f"Сегодня ({d.strftime('%d.%m')})"
-        elif i == 1:
-            text = f"Завтра ({d.strftime('%d.%m')})"
-        else:
-            text = f"{weekdays[d.weekday()]} ({d.strftime('%d.%m')})"
+    for i in range(days_ahead):
+        date = today + timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        label = date.strftime("%d.%m (%a)")
 
         keyboard.append([
             InlineKeyboardButton(
-                text=text,
-                callback_data=f"date_{d.isoformat()}"
+                text=label,
+                callback_data=f"date_{date_str}"
             )
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+# ---------------------------
+# Выбор времени
+# ---------------------------
 def times_kb(times):
-    """
-    Кнопки выбора времени
-    times — список свободного времени
-    """
     keyboard = []
 
-    for t in times:
+    for time in times:
         keyboard.append([
             InlineKeyboardButton(
-                text=t,
-                callback_data=f"time_{t}"
+                text=time,
+                callback_data=f"time_{time}"
             )
         ])
 
-    # добавляем кнопку "Отмена" внизу
-    keyboard.append([
-        InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
-    ])
-
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def confirm_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_yes"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="confirm_no"),
-        ]
-    ])
 
+# ---------------------------
+# Подтверждение записи
+# ---------------------------
+def confirm_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_yes"),
+                InlineKeyboardButton(text="❌ Отменить", callback_data="confirm_no")
+            ]
+        ]
+    )
+
+
+# ---------------------------
+# Кнопка "Поделиться номером"
+# ---------------------------
+def phone_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="📞 Поделиться номером телефона",
+                    request_contact=True
+                )
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )

@@ -6,4 +6,5 @@ class BookingStates(StatesGroup):
     master = State()    # выбор мастера
     date = State()      # выбор даты
     time = State()      # выбор времени
+    phone = State()     # телефон
     confirm = State()   # подтверждение

@@ -1,30 +1,30 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram import Router, F, Bot
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
-from aiogram import Bot
 
 from config import ADMIN_ID, WORKING_HOURS, DAYS_AHEAD
-from database.db import (
+
+from database.models import (
     add_booking,
     get_services,
     get_masters,
+    get_bookings_by_date,
     get_service_by_id,
-    get_master_by_id,
-    get_bookings_by_date
+    get_master_by_id
 )
+
 from keyboards.client_kb import (
     services_kb,
     masters_kb,
     dates_kb,
     times_kb,
     confirm_kb,
+    phone_kb
 )
+
 from states.booking_states import BookingStates
 
-from datetime import date
-
 router = Router()
-
 
 # ---------------------------
 # 1️⃣ Запись → выбор услуги
@@ -32,18 +32,20 @@ router = Router()
 @router.callback_query(F.data == "book")
 async def choose_service(callback: CallbackQuery, state: FSMContext):
     services = get_services()
+
     if not services:
         await callback.message.answer("❌ Услуги пока не добавлены")
         return
 
     await state.clear()
+
     await callback.message.answer(
         "Выберите услугу:",
         reply_markup=services_kb(services)
     )
+
     await state.set_state(BookingStates.service)
     await callback.answer()
-
 
 # ---------------------------
 # 2️⃣ Выбор услуги → мастер
@@ -57,6 +59,7 @@ async def choose_master(callback: CallbackQuery, state: FSMContext):
     await state.update_data(service_id=service_id)
 
     masters = get_masters()
+
     if not masters:
         await callback.message.answer("❌ Мастера не добавлены")
         return
@@ -65,9 +68,9 @@ async def choose_master(callback: CallbackQuery, state: FSMContext):
         "Выберите мастера:",
         reply_markup=masters_kb(masters)
     )
+
     await state.set_state(BookingStates.master)
     await callback.answer()
-
 
 # ---------------------------
 # 3️⃣ Выбор мастера → дата
@@ -84,9 +87,9 @@ async def choose_date(callback: CallbackQuery, state: FSMContext):
         "Выберите дату:",
         reply_markup=dates_kb(DAYS_AHEAD)
     )
+
     await state.set_state(BookingStates.date)
     await callback.answer()
-
 
 # ---------------------------
 # 4️⃣ Выбор даты → время
@@ -99,8 +102,9 @@ async def choose_time(callback: CallbackQuery, state: FSMContext):
     selected_date = callback.data.replace("date_", "")
     await state.update_data(date=selected_date)
 
-    # Получаем все занятые часы для выбранной даты
-    busy_times = [t[0] for t in get_bookings_by_date(selected_date)]
+    busy = get_bookings_by_date(selected_date)
+    busy_times = [b[0] for b in busy]  # берем только время
+
     free_times = [t for t in WORKING_HOURS if t not in busy_times]
 
     if not free_times:
@@ -111,94 +115,118 @@ async def choose_time(callback: CallbackQuery, state: FSMContext):
         "Выберите время:",
         reply_markup=times_kb(free_times)
     )
+
     await state.set_state(BookingStates.time)
     await callback.answer()
 
-
 # ---------------------------
-# 5️⃣ ВЫБОР ВРЕМЕНИ → ПОДТВЕРЖДЕНИЕ
+# 5️⃣ ВЫБОР ВРЕМЕНИ → ЗАПРОС ТЕЛЕФОНА
 # ---------------------------
 @router.callback_query(BookingStates.time)
-async def confirm(callback: CallbackQuery, state: FSMContext):
+async def ask_phone(callback: CallbackQuery, state: FSMContext):
     if not callback.data.startswith("time_"):
         return
 
     selected_time = callback.data.replace("time_", "")
     await state.update_data(time=selected_time)
 
+    await callback.message.answer(
+        "📞 Для подтверждения записи, пожалуйста, поделитесь номером телефона:",
+        reply_markup=phone_kb()
+    )
+
+    await state.set_state(BookingStates.phone)
+    await callback.answer()
+
+# ---------------------------
+# 6️⃣ ПОЛУЧЕНИЕ ТЕЛЕФОНА → ПОДТВЕРЖДЕНИЕ
+# ---------------------------
+@router.message(BookingStates.phone, F.contact)
+async def get_phone(message: Message, state: FSMContext):
+    contact = message.contact
+
+    # защита — номер должен принадлежать пользователю
+    if contact.user_id != message.from_user.id:
+        await message.answer("❌ Пожалуйста, отправьте СВОЙ номер телефона")
+        return
+
+    phone = contact.phone_number
+    await state.update_data(phone=phone)
+
     data = await state.get_data()
+
     service_name = get_service_by_id(data["service_id"])
     master_name = get_master_by_id(data["master_id"])
 
-    await callback.message.answer(
+    await message.answer(
         "Подтвердите запись:\n\n"
         f"🛠 Услуга: {service_name}\n"
         f"👨‍🔧 Мастер: {master_name}\n"
         f"📅 Дата: {data['date']}\n"
-        f"⏰ Время: {data['time']}",
+        f"⏰ Время: {data['time']}\n"
+        f"📞 Телефон: {phone}",
         reply_markup=confirm_kb()
     )
-    await state.set_state(BookingStates.confirm)
-    await callback.answer()
 
+    await state.set_state(BookingStates.confirm)
 
 # ---------------------------
-# 6️⃣ ПОДТВЕРЖДЕНИЕ → БД
+# 7️⃣ ПОДТВЕРЖДЕНИЕ → СОХРАНЕНИЕ
 # ---------------------------
 @router.callback_query(BookingStates.confirm, F.data == "confirm_yes")
 async def save_booking(callback: CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
+
     service_name = get_service_by_id(data["service_id"])
     master_name = get_master_by_id(data["master_id"])
 
-    # Сохраняем в БД
     add_booking(
         client_id=callback.from_user.id,
         client_name=callback.from_user.full_name,
-        service_name=service_name,
-        master_name=master_name,
+        service=service_name,
+        master=master_name,
         date=data["date"],
-        time=data["time"]
+        time=data["time"],
+        phone=data["phone"]
     )
 
-    # Сообщение клиенту
+    # сообщение клиенту
     await callback.message.answer(
-        "✅ Вы успешно записаны!\n\n"
-        f"🛠 Услуга: {service_name}\n"
-        f"👨‍🔧 Мастер: {master_name}\n"
-        f"📅 Дата: {data['date']}\n"
-        f"⏰ Время: {data['time']}"
+        "✅ Вы успешно записаны! Мы свяжемся с вами.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
-    # 🔔 Уведомление админу
-    user = callback.from_user
-    client_name = user.full_name
-
-    text = (
-        "📢 <b>Новая запись!</b>\n\n"
-        f"🛠 Услуга: {service_name}\n"
-        f"👨‍🔧 Мастер: {master_name}\n"
-        f"📅 Дата: {data['date']}\n"
-        f"⏰ Время: {data['time']}\n\n"
-        f"👤 Клиент: {client_name} - <a href='tg://user?id={user.id}'>написать</a>\n"
-        f"🆔 ID: <code>{user.id}</code>"
+    # ссылка на клиента
+    username = callback.from_user.username
+    user_link = (
+        f"https://t.me/{username}"
+        if username else
+        f"tg://user?id={callback.from_user.id}"
     )
 
+    # уведомление админу
     await bot.send_message(
         ADMIN_ID,
-        text,
-        parse_mode="HTML"
+        "📢 Новая запись!\n\n"
+        f"🛠 Услуга: {service_name}\n"
+        f"👨‍🔧 Мастер: {master_name}\n"
+        f"📅 Дата: {data['date']}\n"
+        f"⏰ Время: {data['time']}\n"
+        f"📞 Телефон: {data['phone']}\n"
+        f"👤 Клиент: {user_link}"
     )
 
     await state.clear()
     await callback.answer()
 
-
 # ---------------------------
-# 7️⃣ ОТМЕНА
+# 8️⃣ ОТМЕНА
 # ---------------------------
 @router.callback_query(BookingStates.confirm, F.data == "confirm_no")
-async def cancel(callback: CallbackQuery, state: FSMContext):
+async def cancel_booking(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.answer("❌ Запись отменена")
+    await callback.message.answer(
+        "❌ Запись отменена",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await callback.answer()
